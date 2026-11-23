@@ -1,0 +1,1 @@
+scrivi un sommario di quanto è stato fatto e proponi un piano per studiare il framework zephyr e opentitan relativamente alle necessità di progetto. Inoltre, pianifica un modo in cui l'agentic development possa essere utilizzato per supportare lo sviluppo. Tutto questo in inglese.
