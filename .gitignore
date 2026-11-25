@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .DS_Store
 output/architettura_minima/build/
+
+# Configurazione locale di editor e agenti
+.vscode/
+.clinerules/
