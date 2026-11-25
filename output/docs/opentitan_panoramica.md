@@ -1,4 +1,4 @@
-mangiare# OpenTitan: panoramica dei componenti di sicurezza
+# OpenTitan: panoramica dei componenti di sicurezza
 
 > Documento di lavoro per la scelta degli IP core da integrare nella piattaforma LiteX.
 > Fonti: documentazione ufficiale OpenTitan (elenco degli IP in `hw/ip` e pagina di
@@ -91,9 +91,11 @@ propri con driver Zephyr esistenti (`litex,uart`, `litex,spi`, `litex,i2c`,
 
 ## 4. Vincoli di integrazione in LiteX
 
-1. **Bus.** Gli IP parlano TL-UL; LiteX offre Wishbone, AXI, AXI-Lite e AHB. Nel
-   checkout in uso non c'è alcun supporto TL-UL: serve un adattatore
-   Wishbone → TL-UL (o AXI-Lite → TL-UL), da scrivere o da riusare.
+1. **Bus.** Gli IP parlano TL-UL; LiteX offre Wishbone, AXI, AXI-Lite e AHB e non
+   supporta TL-UL. Per questo gli IP non vengono collegati al bus dell'host: stanno nella
+   RoT dedicata, su una crossbar TL-UL interna, e LiteX istanzia la RoT come blocco unico
+   (`rot_stato_arte_architettura.md`, §4.3). Non serve quindi un adattatore
+   Wishbone → TL-UL.
 2. **Linguaggio e primitive.** L'RTL è SystemVerilog e dipende dalla libreria di
    primitive `prim` di OpenTitan. LiteX può istanziare moduli esterni, ma la toolchain
    deve accettare SystemVerilog: per la GateMate (flusso Yosys) può servire una
@@ -111,19 +113,12 @@ propri con driver Zephyr esistenti (`litex,uart`, `litex,spi`, `litex,i2c`,
    OpenTitan; la copertura per gli acceleratori crittografici va verificata
    **[da verificare]**. Per ogni IP integrato va previsto un driver o un binding.
 
-## 5. Proposta di selezione per le prime release
+## 5. Selezione degli IP
 
-| Passo | IP | Motivazione | Difficoltà stimata |
-|---|---|---|---|
-| 1 | Adattatore Wishbone → TL-UL | Prerequisito di tutti gli altri | Bassa |
-| 2 | `hmac` | Utile da subito (integrità, autenticazione), nessun mascheramento, poche dipendenze | Bassa |
-| 3 | `aes` (senza mascheramento) | Cifratura simmetrica; senza mascheramento non richiede EDN | Media |
-| 4 | `entropy_src` + `csrng` + `edn` | Generazione di numeri casuali; abilita il mascheramento di AES e KMAC | Media-alta |
-| 5 | `kmac`, `rom_ctrl` | Avvio verificato (controllo del digest della ROM) | Alta |
-| 6 | `keymgr`, `lc_ctrl`, `otp_ctrl`, `alert_handler` | Root of trust completa; fortemente interdipendenti | Molto alta |
-
-I passi 1–3 sono compatibili con un approccio incrementale e non richiedono altri
-blocchi OpenTitan. Dal passo 4 in poi gli IP vanno integrati a gruppi.
+La selezione e l'ordine di integrazione degli IP seguono le fasi della RoT dedicata
+descritte in `rot_stato_arte_architettura.md` (§4.3). La proposta precedente, che
+prevedeva gli IP sul bus dell'host tramite un adattatore Wishbone → TL-UL, è conservata
+nel tag git `m0`.
 
 ## 6. Alternative già presenti in LiteX
 
@@ -133,5 +128,7 @@ blocchi OpenTitan. Dal passo 4 in poi gli IP vanno integrati a gruppi.
   è **[da verificare]**.
 - **Ibex.** LiteX supporta Ibex come CPU, ma il supporto Zephyr per LiteX è definito
   per VexRiscv: cambiare CPU significherebbe scrivere un nuovo SoC in Zephyr.
+  Nell'architettura attuale Ibex non esegue Zephyr: è la CPU della RoT ed esegue solo
+  il suo firmware, mentre Zephyr resta su VexRiscv.
 - **Bus Firewall.** Agisce sul bus Wishbone ed è complementare a PMP: il PMP limita ciò
   che il software può indirizzare, il firewall filtra le transazioni di ogni master.

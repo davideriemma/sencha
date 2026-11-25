@@ -22,14 +22,16 @@ L'architettura è stata scelta con tre criteri:
    registri e interrupt coincidono; cambiano solo la frequenza di clock e i pin. Il BSP
    sviluppato in simulazione resta quindi valido sulla scheda.
 3. **Estendibilità.** Il bus di sistema è Wishbone, uno dei due standard (con AXI)
-   richiesti dal Bus Firewall, e lascia un punto di innesto esplicito per gli IP core
-   di sicurezza previsti nelle fasi successive.
+   richiesti dal Bus Firewall. Le funzioni di sicurezza non si innestano su questo bus:
+   sono affidate a una RoT dedicata, collegata all'host solo tramite un link SPI
+   (`rot_stato_arte_architettura.md`, §4).
 
 ## 2. Componenti
 
-La Figura (file `component_diagram.svg`, copia `component_diagram.png`, sorgente
-`component_diagram.puml`) riporta il
-diagramma dei componenti UML. I componenti sono i seguenti.
+Il diagramma dei componenti dell'architettura obiettivo, host e RoT, è in
+`component_diagram_rot.svg` (sorgente `component_diagram_rot.puml`). Il diagramma
+dell'architettura minima così come implementata in M0 è conservato nel tag git `m0`.
+I componenti dell'host minimo sono i seguenti.
 
 | Componente | Ruolo | Configurazione |
 |---|---|---|
@@ -80,8 +82,10 @@ Le scelte non ovvie sono tre.
 Lo stato attuale della verifica è il seguente. Lo script è stato eseguito per entrambi
 i target fino alla generazione del Verilog e dell'overlay: le due mappe dei registri
 differiscono solo per nome della piattaforma, identificativo e frequenza di clock.
-L'avvio in simulazione della nuova architettura e la compilazione di Zephyr **non sono
-ancora stati eseguiti** e costituiscono il passo successivo.
+Il 23/11/2026 l'architettura è stata avviata in simulazione fino al prompt del BIOS,
+con test di memoria su MAIN_RAM riuscito (milestone M0, tag git `m0`). La
+compilazione e l'avvio di Zephyr (M1) e la sintesi per la GateMate **non sono ancora
+stati eseguiti**.
 
 ## 4. Dal SoC al BSP Zephyr
 
@@ -110,8 +114,13 @@ SPI, I2C, SD, watchdog). L'immagine `zephyr.bin` viene poi:
 Lo sviluppo procede in modo incrementale: a ogni passo si aggiunge un componente
 hardware e il relativo supporto software in Zephyr.
 
-1. **Bus Firewall** tra i master Wishbone della CPU e l'interconnessione, con interfaccia
-   di configurazione nella regione CSR.
-2. **IP core OpenTitan**, collegati tramite un adattatore da Wishbone a TL-UL (il bus
-   usato dagli IP OpenTitan, non supportato nativamente da LiteX). La selezione degli IP
-   è discussa in `opentitan_panoramica.md`.
+L'architettura obiettivo è descritta in `rot_stato_arte_architettura.md` (§4) e
+pianificata in `PLAN.md`.
+
+1. **Periferiche dell'host:** SPI master per ADC e memorie esterne, SPI verso la RoT,
+   networking (LiteEth, oppure W5500/ENC28J60 su SPI), GPIO e watchdog.
+2. **RoT dedicata:** Ibex con IP OpenTitan su crossbar TL-UL interna, istanziata da
+   LiteX come blocco unico. L'host vi accede solo tramite il link SPI e la RoT ne
+   controlla il reset (`HOST_RST_N`) per il secure boot.
+3. **Bus Firewall** tra i master Wishbone dell'host (CPU, DMA di LiteEth) e
+   l'interconnessione, con interfaccia di configurazione nella regione CSR.

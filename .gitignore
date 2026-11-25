@@ -8,3 +8,7 @@ output/architettura_minima/build/
 # Configurazione locale di editor e agenti
 .vscode/
 .clinerules/
+
+# Piani di lavoro locali (agente e autore)
+agent-plan.md
+human-plan.md

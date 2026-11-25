@@ -8,13 +8,9 @@
 > the first Tang Primer build, now archived). Items not yet confirmed by a run keep the
 > **[to be verified]** marker.
 >
-> **Revision of 25 Nov 2026.** The architecture changed from "OpenTitan IPs on the host
-> Wishbone bus through a Wishbone→TL-UL adapter" to "two entities":
-> - a RoT (Ibex, internal TL-UL crossbar, OpenTitan IPs), instantiated by LiteX as a
->   single block;
-> - the host SoC (VexRiscv, LiteX cores).
->
-> The two talk only over an SPI link. §1, §3, §4, §6, §7 and §8 are updated accordingly.
+> **Revision of 25 Nov 2026.** The plan follows the two-entity architecture (dedicated
+> RoT + host SoC, linked only over SPI). The earlier plan, with OpenTitan IPs on the host
+> bus through a Wishbone→TL-UL adapter, is kept in the git tag `m0`.
 
 ## 1. Summary of work done
 
@@ -43,11 +39,10 @@
 
 - **Zephyr overlay generation** (`overlay.dts`, `overlay.config`) from `csr.json` with
   the LiteX tool `litex_json2dts_zephyr`.
-- **OpenTitan survey** (`docs/opentitan_panoramica.md`): security IPs, integration
-  constraints in LiteX, and a proposed order: Wishbone→TL-UL adapter, `hmac`, `aes`
-  without masking, entropy chain, `kmac`/`rom_ctrl`, then the key-manager group. This order is superseded by the RoT phases below.
-- **Thesis material**: draft of the architecture paragraph and a UML component diagram
-  (`docs/component_diagram.svg`).
+- **OpenTitan survey** (`docs/opentitan_panoramica.md`): security IPs and integration
+  constraints in LiteX. The IP selection follows the RoT phases (§3).
+- **Thesis material**: draft of the architecture paragraph (`docs/architettura_minima.md`).
+  The M0 component diagram is kept in the git tag `m0`.
 - **Security architecture defined (24 Nov 2026)** in `docs/rot_stato_arte_architettura.md`.
   The working name is **Sencha**. The document covers:
   - the state of the art: limits of TPM, fTPM and TEE, dedicated RoTs, cost data;
@@ -115,8 +110,7 @@ Each phase has a hands-on exercise in this repository and an exit criterion.
 
 ## 3. Study plan: OpenTitan (scoped to project needs)
 
-The order follows the RoT phases of `docs/rot_stato_arte_architettura.md` §4.3. It
-replaces the order of `docs/opentitan_panoramica.md` §5.
+The order follows the RoT phases of `docs/rot_stato_arte_architettura.md` §4.3.
 
 | Phase | Topics | Exit criterion |
 |---|---|---|
