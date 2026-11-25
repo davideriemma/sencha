@@ -75,3 +75,11 @@ This project aims to show how to build a cost-effective, open-source secure IoT 
 - Quantifies security costs on low-cost FPGA platforms (planned)
 
 The work addresses the gap between proprietary secure solutions and open, minimal-security implementations for IoT applications.
+
+## License
+
+Copyright 2026 davideriemma
+
+This project is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+
+Third-party components are not part of this repository and keep their own licenses: LiteX (cloned into `./litex`, BSD-2-Clause) and the OpenTitan IP cores planned for the RoT (Apache-2.0, compatible with this license).
