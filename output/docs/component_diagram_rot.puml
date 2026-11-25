@@ -1,0 +1,90 @@
+@startuml component_diagram_rot
+' Architettura a due entità: RoT dedicata (Ibex + IP OpenTitan) e chip principale (VexRiscv + LiteX).
+' Sorgente del diagramma; component_diagram_rot.svg ne è la versione già renderizzata (a mano).
+' Rendering: plantuml -tsvg component_diagram_rot.puml
+
+skinparam componentStyle uml2
+skinparam linetype ortho
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+
+title Sencha (nome provvisorio) - RoT dedicata + chip principale - diagramma dei componenti
+
+package "RoT (Ibex, bus TL-UL, IP OpenTitan)" <<subsystem>> as ROT {
+    component "Ibex\nRV32IMC, PMP\n(SecureIbex: fase 3)" <<cpu>> as IBEX
+    component "Crossbar TL-UL" <<interconnect>> as XBAR
+    component "Boot ROM\n(rom_ctrl: fase 2)" <<memory>> as BROM
+    component "SRAM privata\n(sram_ctrl)" <<memory>> as RSRAM
+    component "hmac\nSHA-256 / HMAC" <<crypto>> as HMAC
+    component "otp_ctrl (emulato)\nhash chiave pubblica,\nanti-rollback, stato LC" <<storage>> as OTP
+    component "lc_ctrl (ridotto)\nDEV / PROD / RMA" <<lifecycle>> as LC
+    component "spi_host\nverso SPI flash" <<peripheral>> as SPIH
+    component "spi_device\nmodo TPM (mailbox)\n+ flash passthrough" <<peripheral>> as SPID
+    component "gpio / rstmgr\nHOST_RST_N, ROT_IRQ" <<peripheral>> as RGPIO
+    component "rv_timer + aon_timer\n(watchdog)" <<peripheral>> as RTIM
+    component "entropy_src > csrng > edn" <<fase 2>> as ENT #white;line.dashed
+    component "keymgr, aes" <<fase 3>> as KM #white;line.dashed
+    component "otbn" <<escluso su GateMate>> as OTBN #white;line.dashed
+    component "alert_handler (ridotto)" <<fase 2>> as ALERT #white;line.dashed
+}
+
+package "Chip principale (VexRiscv, Wishbone, core LiteX)" <<subsystem>> as HOST {
+    component "VexRiscv\nRV32IM (variante secure: PMP)" <<cpu>> as VEX
+    component "Bus Firewall" <<previsto>> as FW #white;line.dashed
+    component "Bus Wishbone 32 bit" <<interconnect>> as WB
+    component "ROM (boot stub)\nSRAM, MAIN_RAM" <<memory>> as HMEM
+    component "LiteSPI\n(flash via RoT)" <<peripheral>> as LSPI
+    component "SPI master (litex,spi)\nADC / memorie" <<peripheral>> as SPIM
+    component "SPI master dedicato\nlink verso RoT" <<peripheral>> as SPIL
+    component "LiteEth MAC\n(oppure W5500/ENC28J60 su SPI)" <<networking>> as ETH
+    component "UART, Timer, GPIO,\nWatchdog, ctrl" <<peripheral>> as HPER
+}
+
+interface "Link inter-chip\nSPI (TCG PTP framing)\n+ HOST_RST_N, ROT_IRQ" as LINK
+database "SPI flash\n(immagini firmate)" as FLASH
+node "ADC / memorie\nesterne" as ADC
+node "PHY Ethernet" as PHY
+
+IBEX --> XBAR
+XBAR --> BROM
+XBAR --> RSRAM
+XBAR --> HMAC
+XBAR --> OTP
+XBAR --> LC
+XBAR --> SPIH
+XBAR --> SPID
+XBAR --> RGPIO
+XBAR --> RTIM
+XBAR ..> ENT
+XBAR ..> KM
+XBAR ..> ALERT
+
+VEX --> FW
+FW --> WB
+WB --> HMEM
+WB --> LSPI
+WB --> SPIM
+WB --> SPIL
+WB --> ETH
+WB --> HPER
+
+SPIH --> FLASH
+LSPI --> SPID : flash CS\n(passthrough filtrato)
+SPIL --> LINK
+LINK --> SPID : TPM CS
+RGPIO --> VEX : HOST_RST_N\n(reset gating)
+RGPIO --> HPER : ROT_IRQ
+SPIM --> ADC
+ETH --> PHY
+
+note bottom of ROT
+  L'host non ha alcun accesso al bus della RoT:
+  l'unico ingresso è il link SPI (comandi validati dal firmware RoT).
+end note
+
+note bottom of HOST
+  Linea continua: componente previsto nella prima versione.
+  Linea tratteggiata: fase successiva o escluso per limiti di area.
+end note
+
+@enduml

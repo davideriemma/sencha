@@ -7,6 +7,8 @@
 | `docs/architettura_minima.md` | Bozza del paragrafo: architettura minima e lavoro svolto |
 | `docs/component_diagram.svg` / `.png` | Diagramma dei componenti UML |
 | `docs/component_diagram.puml` | Sorgente PlantUML dello stesso diagramma |
+| `docs/rot_stato_arte_architettura.md` | Stato dell'arte (TPM, RoT integrate e dedicate, costi), architettura RoT + chip principale, link inter-chip, novelty e obiettivi |
+| `docs/component_diagram_rot.svg` / `.puml` | Diagramma dei componenti: RoT (Ibex, IP OpenTitan) + chip principale (VexRiscv, LiteX) |
 | `docs/opentitan_panoramica.md` | Panoramica degli IP di sicurezza OpenTitan e proposta di selezione |
 | `PLAN.md` | Piano in inglese: sintesi del lavoro, studio di Zephyr e OpenTitan, sviluppo agentico, calendario giornaliero 21 nov – 15 dic |
 | `architettura_minima/minimal_soc.py` | Definizione del SoC minimo (target `sim` e `gatemate`) |

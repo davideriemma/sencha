@@ -1,11 +1,20 @@
 # Project plan: status, study plan and agentic development
 
-> Working document for the thesis on a LiteX-based SoC running Zephyr, with a Bus
-> Firewall and OpenTitan security IPs. Written for the thesis author and their
-> supervisor. Everything in §1 comes from the existing files in this folder
-> (`README.md`, `docs/architettura_minima.md`, `docs/opentitan_panoramica.md`, and the
-> log of the first Tang Primer build, now archived). Items not yet confirmed by a run keep
-> the **[to be verified]** marker.
+> Working document for the thesis on a LiteX-based SoC running Zephyr, paired with a
+> dedicated Root of Trust (RoT) built from OpenTitan IPs, plus a Bus Firewall. Written
+> for the thesis author and their supervisor. Everything in §1 comes from the existing
+> files in this folder (`README.md`, `docs/architettura_minima.md`,
+> `docs/opentitan_panoramica.md`, `docs/rot_stato_arte_architettura.md`, and the log of
+> the first Tang Primer build, now archived). Items not yet confirmed by a run keep the
+> **[to be verified]** marker.
+>
+> **Revision of 25 Nov 2026.** The architecture changed from "OpenTitan IPs on the host
+> Wishbone bus through a Wishbone→TL-UL adapter" to "two entities":
+> - a RoT (Ibex, internal TL-UL crossbar, OpenTitan IPs), instantiated by LiteX as a
+>   single block;
+> - the host SoC (VexRiscv, LiteX cores).
+>
+> The two talk only over an SPI link. §1, §3, §4, §6, §7 and §8 are updated accordingly.
 
 ## 1. Summary of work done
 
@@ -36,9 +45,24 @@
   the LiteX tool `litex_json2dts_zephyr`.
 - **OpenTitan survey** (`docs/opentitan_panoramica.md`): security IPs, integration
   constraints in LiteX, and a proposed order: Wishbone→TL-UL adapter, `hmac`, `aes`
-  without masking, entropy chain, `kmac`/`rom_ctrl`, then the key-manager group.
+  without masking, entropy chain, `kmac`/`rom_ctrl`, then the key-manager group. This order is superseded by the RoT phases below.
 - **Thesis material**: draft of the architecture paragraph and a UML component diagram
   (`docs/component_diagram.svg`).
+- **Security architecture defined (24 Nov 2026)** in `docs/rot_stato_arte_architettura.md`.
+  The working name is **Sencha**. The document covers:
+  - the state of the art: limits of TPM, fTPM and TEE, dedicated RoTs, cost data;
+  - the novelty and the thesis objectives O1–O6;
+  - a new component diagram (`docs/component_diagram_rot.svg`).
+
+  | Entity | Content |
+  |---|---|
+  | RoT | Ibex (RV32IMC, PMP), TL-UL crossbar, boot ROM with signature check in software, `sram_ctrl`, `hmac`, emulated `otp_ctrl`, reduced `lc_ctrl`, `spi_host` (sole master of the boot flash), `spi_device`, gpio/rstmgr, timers. Later phases: entropy chain, `alert_handler`, then `keymgr`/`aes`. `otbn` and `kmac` are excluded for area |
+  | Host | VexRiscv, ROM boot stub, SRAM, MAIN_RAM, UART, timer, GPIO, watchdog, SPI master for external ADCs and memories, networking (LiteEth, or a W5500/ENC28J60 on SPI) |
+  | Link | One SPI bus to `spi_device` with two chip selects: CS_TPM (mailbox, TCG PTP framing) and CS_FLASH (filtered flash passthrough). Sideband lines `HOST_RST_N` (the RoT gates the host reset) and `ROT_IRQ` |
+  | Software | MCUboot and a generated Zephyr board; later an opaque PSA Crypto driver that maps `psa_*` calls to mailbox commands |
+
+  **Consequence.** The OpenTitan IPs no longer sit on the host bus. The Wishbone→TL-UL
+  adapter is dropped, and its place is taken by a mini TL-UL top for the RoT.
 
 ### Verification status
 
@@ -63,6 +87,16 @@ The environment was rebuilt on 23 Nov 2026 on macOS (Homebrew, Python 3.12 venv 
 - Zephyr driver coverage for the OpenTitan crypto IPs.
 - Whether VexRiscv `secure` (PMP) works with the `litex_vexriscv` board, which declares
   the `standard` variant.
+- Whether two CPUs (VexRiscv and Ibex), the phase-1 RoT IPs and an Ethernet MAC fit the
+  GateMate logic and BRAM budget.
+- Whether OpenTitan `top_englishbreakfast` (reduced Earl Grey) and `tlgen` can serve as
+  the base for the mini RoT top.
+- Whether the GateMate supports bitstream encryption. Without it, keys in the bitstream
+  are readable.
+- Whether the Olimex GateMate A1-EVB has an Ethernet PHY. If not, LiteEth needs an RMII
+  PMOD, or a W5500/ENC28J60 module on SPI can be used.
+- Whether Zephyr upstream has an opaque PSA driver for an external secure element.
+- Code size and boot time of Ed25519 or ECDSA-P256 verification in software on Ibex.
 
 ## 2. Study plan: Zephyr (scoped to project needs)
 
@@ -75,25 +109,29 @@ Each phase has a hands-on exercise in this repository and an exit criterion.
 | **Z2** Devicetree and bindings | DTS and overlays; `compatible` → binding YAML → driver; `DT_*` macros; the `litex,uart`, `litex,timer0`, `litex,soc-controller` bindings | Every node of the generated `overlay.dts` can be explained |
 | **Z3** Drivers and interrupts | `DEVICE_DT_INST_DEFINE`, init levels, RISC-V IRQ path on LiteX, timer driver (`uptime_latch`) | Out-of-tree driver for a dummy CSR peripheral added to `minimal_soc.py` |
 | **Z4** Custom board in a module | Out-of-tree Zephyr module, board definition for `sim` and `gatemate` | `west build -b litex_minimal/...` works for both targets |
-| **Z5** Security-relevant subsystems | Crypto API (`crypto.h`), entropy API, PMP/userspace/MPU, Earl Grey board drivers as reference | A list mapping each planned IP to a Zephyr API |
+| **Z5** Security-relevant subsystems | PSA Crypto API on Mbed TLS / TF-PSA-Crypto and its opaque driver interface, entropy API, MCUboot (image format, signing, anti-rollback), PMP/userspace | A list mapping each RoT service to a PSA or Zephyr API |
 | **Z6** Testing | Twister, ztest, tests on the Verilator target | One Twister test running on simulation |
+| **Z7** SPI and networking | `spi_litex` / `spi_litex_litespi` drivers, the SPI device model for ADCs; LiteEth (`eth_litex_liteeth`) or W5500/ENC28J60 on SPI; the Zephyr network stack | An SPI device read and a ping on the target (sim or board) |
 
 ## 3. Study plan: OpenTitan (scoped to project needs)
 
-The order follows the IP integration order of `docs/opentitan_panoramica.md` §5.
+The order follows the RoT phases of `docs/rot_stato_arte_architettura.md` §4.3. It
+replaces the order of `docs/opentitan_panoramica.md` §5.
 
 | Phase | Topics | Exit criterion |
 |---|---|---|
 | **O1** Comportable IP and tooling | IP directory layout, Hjson register descriptions, `reggen` (RTL, C headers, docs), `prim` library | `hmac` register header generated out of tree |
-| **O2** TL-UL protocol | A/D channels, integrity bits (`tlul_pkg`); design of the Wishbone→TL-UL adapter (or reuse of an existing bridge) | Verilator testbench showing read/write to a TL-UL register block |
-| **O3** Standalone IP extraction | fusesoc core files, building `hmac` outside Earl Grey with Verilator, `sv2v`/Yosys for GateMate | `hmac` synthesised for GateMate, with LUT and BRAM numbers |
-| **O4** Tie-off of system inputs | Alerts, `lc_ctrl` signals, EDN interface; what each tie-off gives up; `aes` with masking disabled | Documented tie-off table per IP |
-| **O5** Software side | OpenTitan DIFs and their mapping to a Zephyr driver (crypto API shim) | Plan for an `hmac` driver |
-| **O6** Later groups | Entropy chain, `kmac`/`rom_ctrl`, `keymgr`/`lc_ctrl`/`otp_ctrl`/`alert_handler`: read-only study; depth decided after O3 gives resource numbers | Updated IP roadmap |
+| **O2** TL-UL and the mini top | A/D channels, integrity bits (`tlul_pkg`); `tlgen` crossbar generation; `top_englishbreakfast` as a reference for a reduced top | Verilator testbench: Ibex reads and writes `hmac` registers through a generated crossbar |
+| **O3** RoT IP extraction | fusesoc core files; Ibex, `hmac`, `spi_device`, `spi_host`, `sram_ctrl` outside Earl Grey; `sv2v`/Yosys for GateMate | Mini RoT top synthesised for GateMate, with LUT and BRAM numbers |
+| **O4** Tie-off of system inputs | Alerts, `lc_ctrl` signals, EDN interface; what each tie-off gives up; emulated OTP with 0→1-only semantics | Documented tie-off table per IP |
+| **O5** RoT software | OpenTitan DIFs; boot ROM: SHA-256 via `hmac`, signature check (Ed25519 or ECDSA-P256) in software, `HOST_RST_N` release; mailbox protocol on `spi_device` TPM mode | Boot ROM that accepts a signed image and rejects an altered one, in simulation |
+| **O6** Later groups | Entropy chain, `alert_handler`, `keymgr`/`aes`, `rom_ctrl`: read-only study; depth decided after O3 gives resource numbers | Updated IP roadmap |
 
-**Bus Firewall.** OpenTitan has no direct equivalent. It is studied through LiteX
-Wishbone internals (interconnect, arbiter, decoder) and compared with PMP: PMP limits
-what software can address, the firewall filters the transactions of each master.
+**Isolation and Bus Firewall.** The RoT is isolated by construction: no bus crosses the
+two domains, only the SPI link. The Bus Firewall stays on the host side. It is studied
+through LiteX Wishbone internals (interconnect, arbiter, decoder) and compared with PMP:
+PMP limits what software can address, while the firewall filters the transactions of
+each master (for example a DMA, or the LiteEth MAC).
 
 ## 4. Milestones
 
@@ -103,9 +141,9 @@ what software can address, the firewall filters the transactions of each master.
 | M1 | Zephyr `hello_world` booting in simulation | Tue 24 Nov |
 | M2 | Same on the GateMate board (or synthesis report if the board is unavailable) | Fri 27 Nov |
 | M3 | Zephyr board module `litex_minimal` | Mon 30 Nov |
-| M4 | Wishbone→TL-UL adapter and `hmac` integrated in simulation | Mon 7 Dec |
-| M5 | `hmac` driver in Zephyr, tested | Wed 9 Dec |
-| M6 | Bus Firewall design | Thu 10 Dec |
+| M4 | Mini RoT top (Ibex, TL-UL crossbar, `hmac`, `spi_device`, `spi_host`) instantiated by LiteX next to the host, in simulation | Mon 7 Dec |
+| M5 | Secure boot in simulation: the RoT verifies the signed host image and releases `HOST_RST_N`; an altered or rolled-back image keeps the host in reset | Wed 9 Dec |
+| M6 | Design only: link protocol (commands, framing), Zephyr mailbox / opaque PSA driver, Bus Firewall interface | Thu 10 Dec |
 
 ## 5. Agentic development plan
 
@@ -125,7 +163,8 @@ AI coding agents (for example Claude Code) support the work as follows.
 | Environment agent | Diagnoses toolchain problems (venv, SDK, Verilator) and writes a setup script |
 | Build-and-run loop | Edits `minimal_soc.py` or Zephyr sources, runs the simulation headless (`--run`), reads the UART log, iterates. Simulation-first design makes this loop closed, with no hardware in it |
 | Code-reading agent | Explores LiteX, Zephyr and OpenTitan sources (bindings, drivers, `tlul_pkg`, Hjson), answers study questions for each Z/O phase, writes notes into `docs/` |
-| RTL helper | Drafts the Wishbone→TL-UL adapter, cocotb/Verilator testbenches and driver skeletons from Hjson. A human reviews all of it |
+| RTL helper | Drafts the mini RoT top (crossbar configuration, LiteX wrapper), cocotb/Verilator testbenches and driver skeletons from Hjson. A human reviews all of it |
+| Research agent | Web and literature search for the state of the art (Sonnet subagents); local Qwen (LM Studio) for bounded reviews and drafts |
 | Test agent | Writes Twister/ztest tests and maintains `make check` (generate → simulate → expect a UART string) |
 | Documentation agent | Keeps the README and thesis drafts in sync with the code; translates between Italian and English |
 | Review | `/code-review` on each change; parallel exploration subagents for large codebases |
@@ -146,12 +185,12 @@ rework. This can become material for Chapter 6.
 | Ch. | Title | Source / state |
 |---|---|---|
 | 1 | Introduction (goal, contributions) | new |
-| 2 | Background: 2.1 LiteX, 2.2 Zephyr, 2.3 OpenTitan | 2.3 from `opentitan_panoramica.md` |
-| 3 | Minimal platform architecture | draft exists (`architettura_minima.md`) |
+| 2 | Background: 2.1 LiteX, 2.2 Zephyr, 2.3 OpenTitan, 2.4 Roots of Trust: state of the art and cost | 2.3 from `opentitan_panoramica.md`; 2.4 from `rot_stato_arte_architettura.md` §2–3 |
+| 3 | Platform architecture: host SoC, dedicated RoT, inter-chip link | draft exists (`architettura_minima.md`, `rot_stato_arte_architettura.md` §4) |
 | 4 | Zephyr BSP for the LiteX platform | new |
-| 5 | OpenTitan IP integration (Wishbone→TL-UL adapter and HMAC) | new |
+| 5 | Dedicated RoT: mini TL-UL top, tie-offs, boot ROM and secure boot | new |
 | 6 | Agentic development methodology and assessment | new |
-| 7 | Bus Firewall design and future work | new |
+| 7 | Link protocol, PSA driver, Bus Firewall design and future work | new |
 | 8 | Conclusions | new |
 
 ## 7. Daily schedule (Sat 21 Nov – Tue 15 Dec 2026)
@@ -168,21 +207,21 @@ and review days. A ★ marks a milestone.
 | Tue 24 Nov | Z1: `litex_vexriscv` board/SoC files | ★ M1: boot Zephyr in sim via `--ram-init`; check 64 KiB MAIN_RAM | Ch4 §1 SoC→BSP build flow |
 | Wed 25 Nov | Z2: devicetree, bindings, `DT_*` macros | Annotate every node of the generated `overlay.dts` | Ch4 §2 Devicetree and overlay |
 | Thu 26 Nov | Z3: driver model, init levels, IRQ path, timer0 driver | Trace the uart and timer drivers in sim (code-reading agent) | Ch4 §3 Drivers and interrupts |
-| Fri 27 Nov | GateMate flow (Yosys, place and route) | ★ M2: GateMate synthesis and resource report; board boot if available | Ch3: resolve BRAM/LUT **[to be verified]** items |
+| Fri 27 Nov | GateMate flow (Yosys, place and route) | ★ M2: GateMate synthesis and resource report (host alone, then Ibex alone, to size the RoT budget); board boot if available | Ch3: resolve BRAM/LUT **[to be verified]** items |
 | Sat 28 Nov | Z3: out-of-tree drivers | Dummy CSR peripheral in `minimal_soc.py` and its Zephyr driver | Ch4 §4 Example custom driver |
 | Sun 29 Nov | Buffer | Catch up on slipped items | Ch2.1 LiteX background; review of week 1 |
 | Mon 30 Nov | Z4: Zephyr modules, custom boards | ★ M3: `litex_minimal` board (sim and gatemate) in a module | Ch4 §5 Custom board |
 | Tue 1 Dec | Z6: Twister, ztest | Twister test on the sim target; wire into `make check` | Ch4 §6 Testing; start Ch6 notes (agent log) |
-| Wed 2 Dec | O1: comportable IP, Hjson, `reggen`, `prim` | Generate `hmac` register RTL and header out of tree | Ch2.3 OpenTitan background (translate the survey) |
-| Thu 3 Dec | O2: TL-UL protocol, `tlul_pkg`, integrity | Design the Wishbone→TL-UL adapter (agent drafts, human reviews) | Ch5 §1 Bus bridging problem |
-| Fri 4 Dec | O2 (cont.) | Implement the adapter and a Verilator/cocotb testbench | Ch5 §2 Adapter design and verification |
-| Sat 5 Dec | O3: fusesoc, `sv2v`, Yosys SystemVerilog support | Standalone `hmac` in Verilator; `sv2v`→Yosys for GateMate | Ch5 §3 IP extraction |
+| Wed 2 Dec | O1: comportable IP, Hjson, `reggen`, `prim` | Generate `hmac` register RTL and header out of tree | Ch2.3 OpenTitan background; Ch2.4 RoT state of the art (from `rot_stato_arte_architettura.md`) |
+| Thu 3 Dec | O2: TL-UL, `tlul_pkg`, `tlgen`, `top_englishbreakfast` | Define the mini RoT top: crossbar config and memory map (agent drafts, human reviews) | Ch5 §1 Why a separate RoT domain instead of IPs on the host bus |
+| Fri 4 Dec | O2 (cont.) | Mini top in Verilator: Ibex + crossbar + `hmac`, testbench | Ch5 §2 Mini top design and verification |
+| Sat 5 Dec | O3: fusesoc, `sv2v`, Yosys SystemVerilog support | Add `spi_device`, `spi_host`, `sram_ctrl`; `sv2v`→Yosys for GateMate | Ch5 §3 IP extraction |
 | Sun 6 Dec | Buffer | Catch up | Polish Ch2; review of week 2 |
-| Mon 7 Dec | O4: tie-offs (alerts, lc, EDN) | ★ M4: integrate `hmac` in `minimal_soc.py` (sim); GateMate area numbers | Ch5 §4 Tie-off table and trade-offs |
-| Tue 8 Dec | Z5 and O5: Zephyr crypto API, OpenTitan DIFs | `hmac` Zephyr driver (crypto API shim) | Ch5 §5 Software support |
-| Wed 9 Dec | Z5 (cont.) | ★ M5: `hmac` test vectors via Twister in sim | Ch5 §6 Results |
-| Thu 10 Dec | Bus Firewall: Wishbone internals, PMP, VexRiscv `secure` | ★ M6: prototype the firewall interface and CSR map (design only) | Ch7 §1 Bus Firewall design |
-| Fri 11 Dec | O6: entropy chain, `kmac`/`rom_ctrl`, `keymgr` group (read-only) | None | Ch7 §2 Future work and IP roadmap |
+| Mon 7 Dec | O4: tie-offs (alerts, lc, EDN), emulated OTP | ★ M4: mini RoT top instantiated in `minimal_soc.py` next to the host, SPI link and `HOST_RST_N` wired (sim); GateMate area numbers | Ch5 §4 Tie-off table and trade-offs |
+| Tue 8 Dec | Z5 and O5: MCUboot image format, PSA Crypto, OpenTitan DIFs | RoT boot ROM: SHA-256 via `hmac`, signature check in software, release `HOST_RST_N`; signing script | Ch5 §5 Boot ROM and secure boot |
+| Wed 9 Dec | Z5 (cont.) | ★ M5: signed Zephyr image boots; altered and rolled-back images are rejected (sim) | Ch5 §6 Results (incl. area and boot time) |
+| Thu 10 Dec | Link protocol, PSA opaque drivers, Bus Firewall (Wishbone internals, PMP) | ★ M6: link command set, Zephyr mailbox/PSA driver skeleton, firewall CSR map (design only) | Ch7 §1 Link, PSA driver and Bus Firewall design |
+| Fri 11 Dec | O6: entropy chain, `alert_handler`, `keymgr`/`aes`, `rom_ctrl` (read-only); Z7 networking | None | Ch7 §2 Future work: link security (ECDH, SPDM), networking, IP roadmap |
 | Sat 12 Dec | None | Collect agent metrics (time, rework rate) | Ch6 Agentic development; Ch1 Introduction |
 | Sun 13 Dec | None | None | Ch8 Conclusions and abstract; full read-through |
 | Mon 14 Dec | None | Agent-assisted consistency check (numbers vs. `csr.json` and logs) | Revision, figures, bibliography |
@@ -193,8 +232,15 @@ and review days. A ★ marks a milestone.
 - **Z0 (21–22 Nov) blocks everything.** If it slips, the Sunday buffers absorb it.
 - **GateMate hardware may be unavailable on 27 Nov.** The board boot then moves to a
   buffer day; synthesis numbers alone are enough for Chapter 3.
-- **Adapter and `hmac` work (4–9 Dec) carries the most risk.** If it slips, Chapter 5
-  reports simulation-only results and the Zephyr driver becomes future work.
+- **M1 slipped (24 Nov).** Zephyr `hello_world` is not yet booted; it moves to the
+  Sun 29 Nov buffer at the latest.
+- **Mini RoT top and secure boot (3–9 Dec) carry the most risk.** If they slip,
+  Chapter 5 reports simulation-only results with a reduced RoT (Ibex + `hmac` +
+  `spi_device`). Signature checking then stays in the host-side MCUboot, and the PSA
+  driver becomes future work.
+- **GateMate area.** Two CPUs plus the RoT IPs may not fit. Fallbacks, in order: drop
+  networking from the board build, keep the RoT and host on separate boards, or report
+  synthesis numbers on a larger FPGA.
 
 ## 8. Immediate next steps
 
@@ -202,3 +248,7 @@ and review days. A ★ marks a milestone.
 - [x] Rebuild the environment (venv, Verilator, RISC-V GCC). Zephyr SDK and `west` still to do.
 - [x] Run `minimal_soc.py --target sim --run` and reach the BIOS prompt (M0).
 - [ ] Build Zephyr `hello_world` with `build/sim/overlay.dts` (M1).
+- [x] Define the security architecture: RoT + host + link, state of the art, objectives
+  (`docs/rot_stato_arte_architettura.md`, 24 Nov).
+- [ ] Check the open items added on 25 Nov: GateMate bitstream encryption, Ethernet PHY
+  on the A1-EVB, `top_englishbreakfast` as a base.
