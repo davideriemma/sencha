@@ -12,3 +12,6 @@ output/architettura_minima/build/
 # Piani di lavoro locali (agente e autore)
 agent-plan.md
 human-plan.md
+
+# Bozze della tesi (locali)
+output/thesis/
