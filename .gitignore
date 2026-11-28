@@ -15,3 +15,7 @@ human-plan.md
 
 # Bozze della tesi (locali)
 output/thesis/
+
+# Exclude commits for zephyr and its submodules
+zephyr/*
+!zephyr/zephyr
